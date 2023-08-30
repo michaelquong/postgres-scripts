@@ -1,40 +1,24 @@
-import configparser
-from pathlib import Path
-from scripts import Postgres, Endpoint
+import yaml
+from scripts import Postgres, Endpoint, kind
 
 def main():
-    config = configparser.ConfigParser()
-    config.read("config.ini")
-    
-    # build configuration
-    cfg = config["source"]
-    src = Endpoint(
-        endpoint_type="source",
-        username=cfg["username"],
-        password=cfg["password"],
-        hostname=cfg["hostname"],
-        port=cfg["port"],
-        database=cfg["database"],
-    )
-    cfg = config["target"]
-    tgt = Endpoint(
-        endpoint_type="target",
-        username=cfg["username"],
-        password=cfg["password"],
-        hostname=cfg["hostname"],
-        port=cfg["port"],
-        database=cfg["database"],
-    )
-    
-    fullpath = Path(config["storage"]["local"]) / "data.sql"
-    
-    # start instance
-    pg = Postgres(source=src, target=tgt)
-    
-    print(pg.client())
-    # output = pg.create_backup(output_file=str(fullpath))
-    
-    # pg.restore_backup(input_file=output)
+  with open("config.yaml", "r") as f:
+    config = yaml.safe_load(f)
+  
+  # start instance
+  pg = Postgres(
+      source=Endpoint(endpoint=kind.SOURCE, **config["postgres"]["source"]), 
+      target=Endpoint(endpoint=kind.TARGET, **config["postgres"]["target"]),
+      storage=config["postgres"]["storage"]["local"]
+  )
+  
+  print(pg.client())
+  output = pg.create_backup(verbosity=True)
+  
+  pg.restore_backup(input_file=output, verbosity=True)
+  
+  print(output)
+  # pg.restore_backup(input_file=output)
     
 
 

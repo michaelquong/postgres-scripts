@@ -5,9 +5,12 @@ import psycopg2
 import subprocess
 from abc import ABC
 from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from urllib import parse
+from pathlib import Path
 from psycopg2 import sql
-from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
-
+from sqlalchemy import URL, create_engine, text
 
 log = logging.getLogger(__name__)
 log_level = logging.INFO
@@ -19,6 +22,12 @@ log_handler.setFormatter(log_format)
 log.addHandler(log_handler)
 
 
+class kind(Enum):
+  SOURCE = "source"
+  TARGET = 'target'
+
+
+@dataclass
 class PGDetails(ABC):
   username: str = "postgres"
   password: str = ""
@@ -27,41 +36,78 @@ class PGDetails(ABC):
   database: str = "postgres"
   
   @property
-  def db_uri(self) -> str:
+  def uri(self) -> URL:
+    """
+    Connection string for self.database
+    """
+    return self.create_uri(self.database)
+  
+  @property
+  def postgres_uri(self) -> URL:
+    """
+    Connection string for postgres database.
+    """
+    return self.create_uri("postgres")
+  
+  def create_uri(self, database:str) -> URL:
     """
     database postgres uri connection string
     """
-    return f"postgresql://{self.username}:{self.password or ''}@{self.hostname}:{self.port}/{self.database}"
-  
-  def dsn(self, database:str = None) -> dict:
-    """
-    Return psycopg2 DSN (Data Source Name) connection parameters
-    """
-    return dict(
-      dbname=database or self.database,
-      user=self.username,
-      password=self.password,
-      host=self.hostname,
-      port=self.port
-    )
- 
+    # return URL.create(
+    #   "postgresql",
+    #   username=self.username,
+    #   password=parse.quote_plus(self.password),
+    #   host=self.hostname,
+    #   port=self.port,
+    #   database=database,
+    # )
+    return f"postgresql://{self.username}:{self.password}@{self.hostname}:{self.port}/{database}"
+
  
 @dataclass
 class Endpoint(PGDetails):
-  endpoint_type:str
-  _restore_database:str = field(init=False, default=None)
+  _temp_database_postfix:str = field(init=False, default="_restore" )
+  endpoint: kind = None
   
-  def __post_init__(self):
-    self._restore_database = f"{self.database}_restore"
+  @property
+  def backup_filename(self) -> str:
+    """
+    filename of SQL backup
+    """
+    return datetime.utcnow().strftime(f"data-{self.database}-%y%m%d_UTC.sql")
 
   @property
-  def restore_db_uri(self) -> str:
-      return f"postgresql://{self.username}:{self.password or ''}@{self.hostname}:{self.port}/{self._restore_database}"
+  def temporary_database(self):
+    """
+    Temporary database name used during data restoration
+    """
+    if self.endpoint is kind.TARGET:
+      return f"{self.database}{self._temp_database_postfix}"
+    raise AttributeError("Attribute not applicable to this Endpoint kind.")
   
+  @property
+  def engine(self):
+    """
+    Create engine object for postgres database; Mainly for administration tasks.
+    """
+
+    
+    
+    return create_engine(self.postgres_uri, isolation_level="AUTOCOMMIT")
+    
+
 @dataclass
 class Postgres:
     source: Endpoint
     target: Endpoint
+    storage: str = "./"
+    
+    @property
+    def backup_filename(self):
+      """
+      Full path to backed up SQL file.
+      """
+      return Path(self.storage) / self.source.backup_filename
     
     def client(self) -> dict:
       """
@@ -85,63 +131,46 @@ class Postgres:
       Preserve existing database by restoring to an alternative database name until migration
       activities complete.
       """
-      # create temporary database to accept data migration
-      migration_db = self.target.restore_db_uri
+      queries = [
+        f"DROP DATABASE IF EXISTS {self.target.temporary_database};",
+        f"CREATE DATABASE {self.target.temporary_database};",
+        f"GRANT ALL PRIVILEGES ON DATABASE {self.target.temporary_database} TO {self.target.username};",
+      ] 
       
-      conn = self.target.dsn(database="postgres")
-      with psycopg2.connect(**conn) as connection:
-        connection.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-        with connection.cursor() as cursor:
-          queries = [
-            # drain activities on migration db
-            sql.SQL("SELECT pg_terminate_backend(pid) "
-                    "FROM pg_stat_activity "
-                    "WHERE pid <> pg_backend_pid() "
-                    "AND datname = {}").format(sql.Literal(migration_db)),
-            # recreate migration db
-            sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Literal(migration_db)),
-            sql.SQL("CREATE DATABASE {}").format(sql.Identifier(migration_db)),
-            # grant privileges
-            sql.SQL("GRANT ALL PRIVILEGES ON DATABASE {} TO {}").format(
-              sql.Literal(migration_db), sql.Literal(self.target.username)
-            ),
-          ]
-          
-          for q in queries:
-            cursor.execute(q)
-          
-          log.info(f"Created {migration_db}...")
-          return migration_db
+      with self.target.engine.begin() as connection:
+        for q in queries:
+          connection.execute(text(q))
+      log.info(f"Created {self.target.temporary_database} for data restoration...")
+      return self.target.temporary_database 
 
-
-    def create_backup(self, output_file:str, verbosity:bool=False) -> str:
+    def create_backup(self, verbosity:bool=False) -> str:
       """
       Create a Postgres Backup of database.
       """
       cmd = [
         "pg_dump",
-        f"--dbname={self.source.db_uri}", 
-        "-Fc", "-f", output_file
+        f"--dbname={self.source.uri}", 
+        "-Fc", "-f", self.backup_filename
       ]
       if verbosity:
         cmd.append("-v")
       
       _, _, _ = run(cmd=cmd)
       
-      log.info(f"Completed backup: {output_file}")
-      return output_file
+      log.info(f"Completed backup: {self.backup_filename}")
+      return self.backup_filename
         
     def restore_backup(self, input_file:str, verbosity:bool=False) -> None:
       """
       Restore a Postgres database from a backup, <input_file>, into `<database>_restore`
       Once restoration has complete, rename `<database>_restore` to `<database>`
       """
-      migration_db = self.create_database()
+      temporary_db = self.create_database()
       
       cmd = [
         "pg_restore",
         "--no-owner",
-        f"--dbname={self.target.restore_db_uri}",
+        f"--dbname={self.target.create_uri(temporary_db)}",
       ]
       if verbosity:
         cmd.append("-v")
@@ -150,30 +179,17 @@ class Postgres:
       output, _, _ = run(cmd=cmd)
       
       # Rename temporary restore database with existing active database.
-      new_db = self.target.database
+      queries = [
+        f"DROP DATABASE IF EXISTS {self.target.database};",
+        f"ALTER DATABASE {self.target.temporary_database} RENAME TO {self.target.database};",
+        f"DROP DATABASE IF EXISTS {self.target.temporary_database};",
+      ] 
       
-      conn = self.target.dsn(database="postgres")
-      with psycopg2.connect(**conn) as connection:
-        connection.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-        with connection.cursor as cursor:
-          queries = [
-            # Drain activities on active database
-            sql.SQL("SELECT pg_terminate_backend(pid) "
-                    "FROM pg_stat_activity "
-                    "WHERE pid <> pg_backend_pid() "
-                    "AND datname = {}").format(sql.Literal(new_db)),
-            # drop existing active database
-            sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Literal(new_db)),
-            # rename migration database as new active database (Replacement)
-            sql.SQL("ALTER DATABASE '{}' RENAME '{}'").format(
-              sql.Identifier(migration_db), sql.Identifier(new_db)
-            )
-          ]
+      with self.target.engine.begin() as connection:
+        for q in queries:
+          connection.execute(text(q))
           
-          for q in queries:
-            cursor.execute(q)
-          
-          log.info(f"Promoting to new {new_db}...")
+      log.info(f"Promoting to new {self.target.database}...")
       log.info(f"Completed restore")
       return None
       
@@ -189,7 +205,9 @@ def run(cmd: list) -> tuple:
     stdout, stderr = process.communicate()
     if int(process.returncode) != 0:
       log.error(stderr.decode("utf-8"))
-    log.info(f"Output: {stdout.decode('utf-8')}")
+      exit(process.returncode)
+    if len(stdout.decode('utf-8')) > 0:
+      log.info(f"Output: {stdout.decode('utf-8')}")
     
   except Exception as e:
     log.error(f"Error running cmd: `{cmd}`. Error Msg: {e}")

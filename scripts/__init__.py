@@ -1,1 +1,1 @@
-from .postgres import Postgres, Endpoint
+from .postgres import Postgres, Endpoint, kind

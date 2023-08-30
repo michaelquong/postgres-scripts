@@ -1,0 +1,16 @@
+postgres:
+  storage:
+    local: ./backups
+  source:
+    username: postgres
+    password: ""
+    hostname: localhost
+    port: 5432
+    database: example
+  target:
+    username: postgres
+    password: ""
+    hostname: localhost
+    port: 5433
+    database: example
+  

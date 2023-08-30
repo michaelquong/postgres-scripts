@@ -11,8 +11,6 @@ def main():
       target=Endpoint(endpoint=kind.TARGET, **config["postgres"]["target"]),
       storage=config["postgres"]["storage"]["local"]
   )
-  
-  print(pg.client())
   output = pg.create_backup(verbosity=True)
   
   pg.restore_backup(input_file=output, verbosity=True)

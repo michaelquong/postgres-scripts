@@ -6,11 +6,11 @@ requirements: .venv requirements.txt
 
 .PHONY: image
 image:
-	@docker build -t my/migration .
+	@docker build -t mquong/scripts .
 
 backups:
 	@mkdir -p $@
 
 .PHONY: run
 run: backups
-	@docker -v ./backups:/app/backups -v ./config.yaml:/app/config.yaml:ro my/migration
+	@docker run -v "${PWD}/backups:/app/backups" -v "${PWD}/config.yaml:/app/config.yaml:ro" mquong/scripts

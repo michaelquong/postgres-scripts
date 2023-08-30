@@ -3,14 +3,14 @@ postgres:
     local: ./backups
   source:
     username: postgres
-    password: ""
+    password: postgres
     hostname: localhost
     port: 5432
-    database: example
+    database: category
   target:
     username: postgres
-    password: ""
+    password: postgres
     hostname: localhost
     port: 5433
-    database: example
+    database: category
   

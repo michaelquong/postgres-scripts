@@ -1,2 +1,8 @@
+.git
+.gitignore
+Dockerfile
+__pycache__/
 backups/
 tests/
+*env*
+*.sql

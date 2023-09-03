@@ -10,10 +10,10 @@ RUN echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg ma
     wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
 RUN apt-get update && apt-get install -y postgresql-client-9.6 postgresql-client-14
 
-RUN mkdir -p backups
+RUN mkdir -p backups &&\
+    mkdir -p data
 
-COPY . /app
-RUN python3 -m pip install -Ur requirements.txt
+COPY entrypoint.sh .
+RUN chmod +x entrypoint.sh
 
-ENTRYPOINT [ "python" ]
-CMD [ "main.py" ]
+ENTRYPOINT [ "entrypoint.sh" ]

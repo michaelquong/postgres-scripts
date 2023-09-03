@@ -1,0 +1,10 @@
+version: '3.7'
+services:
+  migration:
+    image: mquong/scripts
+    environment:
+      SOURCE: URL
+      TARGET: URL
+      FILENAME: data.dump
+    volumes:
+      -./data:/app/data

@@ -6,3 +6,4 @@ backups/
 tests/
 *env*
 *.sql
+*data*

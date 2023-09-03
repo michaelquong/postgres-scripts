@@ -6,11 +6,11 @@ postgres:
     password: postgres
     hostname: localhost
     port: 5432
-    database: category
+    database: example
   target:
     username: postgres
     password: postgres
     hostname: localhost
     port: 5433
-    database: category
+    database: example
   

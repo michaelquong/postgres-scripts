@@ -7,10 +7,13 @@ from abc import ABC
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from functools import partial
 from urllib import parse
 from pathlib import Path
 from psycopg2 import sql
 from sqlalchemy import URL, create_engine, text
+from typing import Any
+
 
 log = logging.getLogger(__name__)
 log_level = logging.INFO
@@ -27,10 +30,13 @@ class kind(Enum):
   TARGET = 'target'
 
 
+def get_defaults(env_key:str, default:Any=None):
+  return partial(os.environ.get, env_key, default)
+
 @dataclass
 class PGDetails(ABC):
   username: str = "postgres"
-  password: str = ""
+  password: str = "postgres"
   hostname: str = "localhost"
   port: int = 5432
   database: str = "postgres"
@@ -70,13 +76,6 @@ class Endpoint(PGDetails):
   endpoint: kind = None
   
   @property
-  def backup_filename(self) -> str:
-    """
-    filename of SQL backup
-    """
-    return datetime.utcnow().strftime(f"data-{self.database}-%y%m%d_UTC.sql")
-
-  @property
   def temporary_database(self):
     """
     Temporary database name used during data restoration
@@ -86,15 +85,20 @@ class Endpoint(PGDetails):
     raise AttributeError("Attribute not applicable to this Endpoint kind.")
   
   @property
-  def engine(self):
+  def engine(self, uri:URL = None):
     """
     Create engine object for postgres database; Mainly for administration tasks.
     """
 
+    return create_engine((uri or self.postgres_uri), isolation_level="AUTOCOMMIT")
     
-    
-    return create_engine(self.postgres_uri, isolation_level="AUTOCOMMIT")
-    
+
+@dataclass
+class Source(Endpoint):
+  endpoint: kind = field(default=kind.SOURCE)
+  
+  
+
 
 @dataclass
 class Postgres:
@@ -107,22 +111,14 @@ class Postgres:
       """
       Full path to backed up SQL file.
       """
-      return Path(self.storage) / self.source.backup_filename
+      filename = datetime.utcnow().strftime(f"data-{self.source.database}-%y%m%d_UTC.sql")
+      return Path(self.storage) / filename
     
     def client(self) -> dict:
       """
       Return Postgres Client info of tools.
       """
-      return "hi"
-    
-    def _extract(self, filename:str) -> str:
-      out, ext = os.path.splitext(filename)
-      
-      with gzip.open(filename, "rb") as f:
-        with open(out, "wb") as f_out:
-          for line in f:
-            f_out.write(line)
-      return out
+      return dict()
     
     def create_database(self)-> str:
       """
@@ -134,7 +130,7 @@ class Postgres:
       queries = [
         f"DROP DATABASE IF EXISTS {self.target.temporary_database};",
         f"CREATE DATABASE {self.target.temporary_database};",
-        f"GRANT ALL PRIVILEGES ON DATABASE {self.target.temporary_database} TO {self.target.username};",
+        # f"GRANT ALL PRIVILEGES ON DATABASE {self.target.temporary_database} TO {self.target.username};",
       ] 
       
       with self.target.engine.begin() as connection:
@@ -169,7 +165,6 @@ class Postgres:
       
       cmd = [
         "pg_restore",
-        "--no-owner",
         f"--dbname={self.target.create_uri(temporary_db)}",
       ]
       if verbosity:

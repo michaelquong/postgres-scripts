@@ -13,7 +13,9 @@ RUN apt-get update && apt-get install -y postgresql-client-9.6 postgresql-client
 RUN mkdir -p backups &&\
     mkdir -p data
 
-COPY entrypoint.sh .
-RUN chmod +x entrypoint.sh
+COPY requirements.txt .
+COPY migrate.py .
+RUN  python3 -m pip install -r requirements.txt
 
-ENTRYPOINT [ "entrypoint.sh" ]
+ENTRYPOINT [ "python" ]
+CMD [ "migrate.py" ]

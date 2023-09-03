@@ -13,4 +13,4 @@ backups:
 
 .PHONY: run
 run: backups
-	@docker run -v "${PWD}/backups:/app/backups" -v "${PWD}/config.yaml:/app/config.yaml:ro" mquong/scripts
+	@docker run -d -v "${PWD}/backups:/app/backups" --env-file=.env mquong/scripts

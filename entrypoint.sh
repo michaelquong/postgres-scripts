@@ -3,15 +3,27 @@
 # Start timing the execution of the entire script
 start_time=$(date +%s)
 
+echo "Starting Schema backup..."
+start_pgdump=$(date +%s)
+pg_dump --dbname="$SOURCE" -w --schema-only -f "/app/backups/schema-$FILENAME" -v
+sleep 10
+end_pgdump=$(date +%s)
+
 echo "Starting backup..."
 start_pgdump=$(date +%s)
-pg_dump --dbname="$SOURCE" -w -Fc  -v -f "$FILENAME"
+pg_dump --dbname="$SOURCE" -w -Fc -f "/app/backups/$FILENAME" -v
+sleep 10
+end_pgdump=$(date +%s)
+
+echo "Starting backup..."
+start_pgdump=$(date +%s)
+pg_dump --dbname="$SOURCE" -w -Fc -f "/app/backups/$FILENAME" -v
 sleep 10
 end_pgdump=$(date +%s)
 
 echo "Starting restore..."
 start_pgrestore=$(date +%s)
-pg_restore --dbname="$TARGET" -v "$FILENAME"
+pg_restore --dbname="$TARGET" -v "/app/backups/$FILENAME"
 sleep 10
 end_pgrestore=$(date +%s)
 
